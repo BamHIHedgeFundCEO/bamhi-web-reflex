@@ -179,4 +179,4 @@ def plot_chart(df, item):
 
     empty_fig = go.Figure()
     empty_fig.update_layout(height=10, margin=dict(t=0,b=0,l=0,r=0), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis=dict(visible=False), yaxis=dict(visible=False))
-    return empty_fig
+    return fig

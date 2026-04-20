@@ -14,6 +14,8 @@ class ChartState(rx.State):
     cat_id: str = ""
     module_name: str = ""
     ticker: str = ""
+    display_name: str = ""  # 👈 新增：用來儲存指標的顯示名稱
+    
     latest_value: float = 0.0
     change_pct: float = 0.0
     has_data: bool = False
@@ -28,10 +30,12 @@ class ChartState(rx.State):
         """把數字轉換成帶有正負號的字串"""
         return f"{self.change_pct:+.2f}%"
 
-    def load_data(self, cat_id: str, module_name: str, ticker: str):
+    # 👇 新增 display_name 參數
+    def load_data(self, cat_id: str, module_name: str, ticker: str, display_name: str = ""):
         self.cat_id = cat_id
         self.module_name = module_name
         self.ticker = ticker
+        self.display_name = display_name  # 👈 存入大腦
         
         row_data = get_data(cat_id, module_name, ticker)
         if row_data:
@@ -47,6 +51,10 @@ class ChartState(rx.State):
             self.note_content = notes.fetch_note(cat_id, module_name, ticker)
         except Exception:
             self.note_content = ""
+            
+        print(f"--- 除錯資訊 ---")
+        print(f"正在嘗試載入模組: data_engine.{cat_id}.{module_name}")
+        print(f"搜尋 Ticker: {ticker}, 名稱: {display_name}")
 
     @rx.var
     def filtered_figure(self) -> go.Figure:
@@ -77,7 +85,13 @@ class ChartState(rx.State):
 
         try:
             mod = importlib.import_module(f"data_engine.{self.cat_id}.{self.module_name}")
-            item_config = {"cat_id": self.cat_id, "module": self.module_name, "ticker": self.ticker}
+            # 👇 關鍵修正：把 name 包裝進去傳給繪圖引擎
+            item_config = {
+                "cat_id": self.cat_id, 
+                "module": self.module_name, 
+                "ticker": self.ticker,
+                "name": self.display_name
+            }
             fig = mod.plot_chart(df_filtered, item_config)
             return fig
         except Exception as e:
@@ -86,7 +100,8 @@ class ChartState(rx.State):
 
 
 # ============== 📊 畫面渲染 (UI) ==============
-def render_dynamic_chart(cat_id: str, module_name: str, ticker: str) -> rx.Component:
+# 👇 新增 display_name 參數
+def render_dynamic_chart(cat_id: str, module_name: str, ticker: str, display_name: str = "") -> rx.Component:
     ranges = ["All", "6m", "YTD", "1Y", "3Y", "5Y", "10Y"]
 
     return rx.box(
@@ -134,7 +149,8 @@ def render_dynamic_chart(cat_id: str, module_name: str, ticker: str) -> rx.Compo
         ),
         
         # 2. 最後面放所有的「設定值與事件」(有名字的關鍵字參數)
-        on_mount=ChartState.load_data(cat_id, module_name, ticker),
+        # 👇 確保這裡把 display_name 傳給大腦
+        on_mount=ChartState.load_data(cat_id, module_name, ticker, display_name),
         width="100%", 
         padding="1rem", 
         bg="#111827", 

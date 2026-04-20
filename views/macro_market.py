@@ -29,13 +29,19 @@ class MacroMarketState(rx.State):
     def current_ticker(self) -> str:
         return UI_MACRO_MAPPING[self.selected_indicator]["ticker"]
 
+    # 👇 1. 新增：抓取顯示名稱供 UI 使用
+    @rx.var
+    def current_name(self) -> str:
+        return UI_MACRO_MAPPING[self.selected_indicator]["name"]
+
     def handle_indicator_change(self, new_indicator: str):
         """當使用者點擊 Radio 選單時觸發"""
         self.selected_indicator = new_indicator
         config = UI_MACRO_MAPPING[new_indicator]
         
         # 🎯 狀態聯動：直接命令 ChartState 去載入新資料
-        return ChartState.load_data(config["cat_id"], config["module"], config["ticker"])
+        # 👇 2. 補上 config["name"]，這樣圖表引擎才不會報 KeyError
+        return ChartState.load_data(config["cat_id"], config["module"], config["ticker"], config["name"])
 
 
 # ============== 🏠 總經市場分頁 (UI) ==============
@@ -69,14 +75,16 @@ def render_macro_market() -> rx.Component:
         render_dynamic_chart(
             MacroMarketState.current_cat_id,
             MacroMarketState.current_module,
-            MacroMarketState.current_ticker
+            MacroMarketState.current_ticker,
+            MacroMarketState.current_name # 👇 3. 補上傳遞名稱參數
         ),
         
         # 當頁面第一次載入時，強制通知圖表大腦抓取預設資料
         on_mount=ChartState.load_data(
             UI_MACRO_MAPPING["10年期美債殖利率"]["cat_id"],
             UI_MACRO_MAPPING["10年期美債殖利率"]["module"],
-            UI_MACRO_MAPPING["10年期美債殖利率"]["ticker"]
+            UI_MACRO_MAPPING["10年期美債殖利率"]["ticker"],
+            UI_MACRO_MAPPING["10年期美債殖利率"]["name"] # 👇 4. 預設載入時也補上名稱
         ),
         
         width="100%",
