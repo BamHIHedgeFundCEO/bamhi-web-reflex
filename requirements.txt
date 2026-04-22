@@ -1,2 +1,22 @@
+# --- Core Framework & Data (核心框架與資料庫) ---
+plotly>=5.18.0
+pandas>=2.0.0
+yfinance>=0.2.37
+pandas-datareader>=0.10.0
 
+# --- UI Components (網頁前端元件 - 新增) ---
+streamlit-option-menu>=0.3.6
+
+# --- Translation Engine (翻譯引擎 - 新增) ---
+deep-translator>=1.11.4
+
+# --- Web Scraping (網頁爬蟲工具) ---
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+html5lib>=1.1
+
+# --- Excel Processing (Excel 讀取工具) ---
+openpyxl>=3.1.0
+xlrd>=2.0.1
 reflex==0.8.28.post1
