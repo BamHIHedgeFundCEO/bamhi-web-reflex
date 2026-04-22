@@ -1,0 +1,51 @@
+name: BamHI Daily Data Update 🚀
+
+# 設定觸發時機
+on:
+  # 1. 定時執行 (Schedule)
+  schedule:
+    # 這是 UTC 時間 22:00 = 台灣時間 早上 06:00
+    # (美股收盤是台灣凌晨 04:00/05:00，所以 06:00 抓資料最保險)
+    - cron: '0 22 * * *'
+  
+  # 2. 手動執行 (讓你在網頁上也可以按按鈕強制更新)
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    # 給予機器人寫入權限 (重要！)
+    permissions:
+      contents: write
+
+    steps:
+      # 1. 把程式碼抓下來
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. 設定 Python 環境
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      # 3. 安裝需要的套件
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas yfinance plotly requests streamlit pandas_datareader
+
+      # 4. 執行你的「中央廚房」腳本 (做便當)
+      - name: Run Data Pipeline
+        run: python update_data.py
+
+      # 5. 把新的 CSV 檔上傳回 Github
+      - name: Commit and push changes
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git add data/*.csv
+          # 如果有資料更新才 commit，沒更新就不做動作 (避免報錯)
+          git commit -m "📈 Auto-update market data [skip ci]" || exit 0
+          git push
