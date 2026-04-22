@@ -2,9 +2,10 @@ import reflex as rx
 import os
 
 config = rx.Config(
-    app_name="bamhi_reflex", # 保持你原本的名字
-    # 告訴前端：大腦現在住在哪個網址？(預設是本機，上線時會讀取環境變數)
+    app_name="bamhi_reflex", 
     api_url=os.environ.get("API_URL", "http://localhost:8000"),
-    # 允許任何網址的前端來索取資料，避免被瀏覽器擋下
     cors_allowed_origins=["*"], 
+    
+    # 👇 加上這行！強迫 Reflex 後端對全世界廣播，讓 Render 能夠偵測到它！
+    backend_host="0.0.0.0", 
 )
