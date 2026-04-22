@@ -1,12 +1,7 @@
 """
 data_engine/equity.py
-負責處理單一個股 (Tearsheet) 的即時資料抓取、指標計算與繪圖
-架構：YFinance (歷史股價) + Financial Modeling Prep (基本面與財報 - 最新 Stable API)
-"""
-"""
-data_engine/equity.py
-負責處理單一個股 (Tearsheet) 的即時資料抓取、指標計算與繪圖
-架構：YFinance (股價) + FMP (美股財報) + TWSE 官方 API (台股財報 - 絕對防封鎖)
+負責處理單一個股 (Tearsheet) 的即時資料抓取、指標計算與繪圖 (純 Reflex 後端版)
+架構：YFinance (股價) + FMP (美股財報) + TWSE 官方 API / FinMind (台股財報 - 絕對防封鎖)
 """
 import numpy as np
 from plotly.subplots import make_subplots
@@ -14,15 +9,15 @@ import yfinance as yf
 import plotly.graph_objects as go
 import pandas as pd
 import requests
-import streamlit as st
 from datetime import datetime, timedelta
+
 # 🔑 你的專屬 FMP API 金鑰
 FMP_API_KEY = "29epqrFbGsBfasHJHyU7fnFT8CcUdeaF"
 
-@st.cache_data(ttl=3600, show_spinner=False)
+# 移除 st.cache_data
 def fetch_stock_profile(ticker: str, period: str = "2y", interval: str = "1d"):
     """
-    BamHI 終極大腦：硬派白嫖流，台股財報全面改用 TWSE 官方端點！
+    BamHI 終極大腦：硬派白嫖流，台股財報全面改用 FinMind 官方端點！
     """
     ticker_upper = ticker.upper()
     is_taiwan_stock = ticker_upper.endswith(".TW") or ticker_upper.endswith(".TWO")
@@ -46,7 +41,8 @@ def fetch_stock_profile(ticker: str, period: str = "2y", interval: str = "1d"):
     hist['Min_20'] = hist['Low'].shift(1).rolling(window=20).min()
     hist['Signal_Up'] = (hist['Close'] > hist['Max_20']) & (hist['Close'].shift(1) <= hist['Max_20'].shift(1))
     hist['Signal_Down'] = (hist['Close'] < hist['Min_20']) & (hist['Close'].shift(1) >= hist['Min_20'].shift(1))
-# ==========================================
+
+    # ==========================================
     # 🧠 植入 BamHI 量化多因子運算 (MFI, MACD, Bias)
     # ==========================================
     try:
@@ -87,6 +83,7 @@ def fetch_stock_profile(ticker: str, period: str = "2y", interval: str = "1d"):
             hist['Composite'] = 50 # 資料太少時給中性分數
     except Exception as e:
         print(f"量化指標計算失敗: {e}")
+
     # ==========================================
     # 引擎 2：智能分流財務萃取
     # ==========================================
@@ -118,7 +115,7 @@ def fetch_stock_profile(ticker: str, period: str = "2y", interval: str = "1d"):
         except Exception as e:
             print(f"FMP 基本資料抓取失敗: {e}")
 
-# ==========================================
+        # ==========================================
         # B. 財務數據 (FinMind API - 專為量化交易設計，不怕雲端封鎖)
         # ==========================================
         # 設定抓取近一年的資料，確保能精準抓到最新一季
@@ -308,12 +305,11 @@ def fetch_stock_profile(ticker: str, period: str = "2y", interval: str = "1d"):
     
     return {"info": info, "history": hist, "income_stmt": income_stmt, "finance_source": finance_source}
 
-# (下方 plot_candlestick 函數保持不變...)
 # ==========================================
-# 繪圖引擎 (完全保留我們做好的高質感 K 線與中文設定)
+# 繪圖引擎 (完全保留高質感 K 線與中文設定)
 # ==========================================
 def plot_candlestick(hist: pd.DataFrame, ticker: str, interval: str = "1d"):
-    if hist.empty: return None
+    if hist.empty: return go.Figure()
         
     # 🌟 建立雙層圖表：上圖佔 70% (K線)，下圖佔 30% (指標)
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
@@ -351,14 +347,14 @@ def plot_candlestick(hist: pd.DataFrame, ticker: str, interval: str = "1d"):
                 x=up_signals.index, y=up_signals['Low'] * 0.96,
                 mode='markers', name='突破20期高',
                 marker=dict(symbol='triangle-up', size=14, color='#34d399', line=dict(width=1, color='black'))
-            ), row=1, col=1) # 👈 指定畫在 Row 1
+            ), row=1, col=1) 
 
         if not down_signals.empty:
             fig.add_trace(go.Scatter(
                 x=down_signals.index, y=down_signals['High'] * 1.04,
                 mode='markers', name='跌破20期低',
                 marker=dict(symbol='triangle-down', size=14, color='#ef4444', line=dict(width=1, color='black'))
-            ), row=1, col=1) # 👈 指定畫在 Row 1
+            ), row=1, col=1) 
 
     # 📊 4️⃣ 下圖 (Row 2): 多因子綜合分數 (Composite)
     if 'Composite' in hist.columns:
@@ -382,7 +378,7 @@ def plot_candlestick(hist: pd.DataFrame, ticker: str, interval: str = "1d"):
     fig.update_layout(
         template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=0, r=0, t=30, b=0), xaxis_rangeslider_visible=False,
-        height=700, # 配合雙層圖加高
+        height=700, 
         title=f"{ticker} 價格走勢與 BamHI 綜合訊號",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )

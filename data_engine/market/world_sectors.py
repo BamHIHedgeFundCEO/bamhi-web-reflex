@@ -70,8 +70,8 @@ def fetch_data(ticker: str):
         return {"history": df, "value": 0, "change_pct": 0}
     return None
 
-# 🧠 獨立出運算邏輯：給熱力圖和表格共用
-def get_calculated_df(df, lookback=20):
+# 🧠 獨立出運算邏輯：給熱力圖和表格共用 (加入 for_table 智慧開關)
+def get_calculated_df(df, lookback=20, for_table=True):
     if df.empty: return pd.DataFrame()
     df = df.set_index('date').ffill()
     all_data = []
@@ -81,7 +81,8 @@ def get_calculated_df(df, lookback=20):
         prev_prices = df.iloc[-lookback-1]
         pct_changes = (curr_prices - prev_prices) / prev_prices
         if lookback >= 5:
-            daily_returns = df.pct_change().tail(lookback)
+            # 加上 fill_method=None 解決 Pandas 警告
+            daily_returns = df.pct_change(fill_method=None).tail(lookback)
             period_vols = daily_returns.std()
             
         for group, tickers in PORTFOLIO_STRUCTURE.items():
@@ -94,23 +95,34 @@ def get_calculated_df(df, lookback=20):
                     vol = period_vols[t]
                     score = (pct_chg / vol) if vol > 0 else 0
                 
-                all_data.append({
-                    "群組": group,
-                    "代號": t,
-                    "名稱": name,
-                    "現價": f"{curr_prices[t]:.2f}",
-                    "漲跌幅(%)": f"{pct_chg * 100:+.2f}%",
-                    "強弱分數": f"{score:+.2f}"
-                })
+                # 💡 核心解法：根據用途決定資料型態
+                if for_table:
+                    # 表格要看的：漂亮字串
+                    all_data.append({
+                        "群組": group, "代號": t, "名稱": name,
+                        "現價": f"{curr_prices[t]:.2f}",
+                        "漲跌幅(%)": f"{pct_chg * 100:+.2f}%",
+                        "強弱分數": f"{score:+.2f}"
+                    })
+                else:
+                    # 畫圖要用的：純數字 (Float)
+                    all_data.append({
+                        "群組": group, "代號": t, "名稱": name,
+                        "現價": float(curr_prices[t]),
+                        "漲跌幅(%)": float(pct_chg * 100),
+                        "強弱分數": float(score)
+                    })
+                    
     res_df = pd.DataFrame(all_data)
-    # 按照群組與分數排序
     if not res_df.empty:
         res_df = res_df.sort_values(by=['群組', '強弱分數'], ascending=[True, False])
     return res_df
 
 # 📊 畫圖邏輯：純粹回傳 fig
 def plot_chart(df, item_config):
-    result_df = get_calculated_df(df, 20)
+    # 💡 呼叫時設定 for_table=False，拿回純數字來畫圖！
+    result_df = get_calculated_df(df, 20, for_table=False)
+    
     if result_df.empty:
         err_fig = go.Figure()
         err_fig.update_layout(title="無數據", template="plotly_dark")
@@ -121,10 +133,13 @@ def plot_chart(df, item_config):
         color='強弱分數', color_continuous_scale='RdYlGn', color_continuous_midpoint=0,
         custom_data=['名稱', '現價', '漲跌幅(%)', '強弱分數'],
     )
+    
+    # 在圖表渲染的最後一刻，才用 Plotly 內建的 d3-format 加上符號
     fig.update_traces(
         textposition='middle center',
-        texttemplate="<b>%{label}</b><br>%{customdata[2]}",
-        hovertemplate="<b>%{label} (%{customdata[0]})</b><br>現價: %{customdata[1]}<br>漲跌幅: %{customdata[2]}<br>強弱分: %{customdata[3]}<extra></extra>"
+        texttemplate="<b>%{label}</b><br>%{customdata[2]:+.2f}%",
+        hovertemplate="<b>%{label} (%{customdata[0]})</b><br>現價: %{customdata[1]:.2f}<br>漲跌幅: %{customdata[2]:+.2f}%<br>強弱分: %{customdata[3]:+.2f}<extra></extra>"
     )
+    
     fig.update_layout(margin=dict(t=10, l=0, r=0, b=0), height=550, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)")
     return fig

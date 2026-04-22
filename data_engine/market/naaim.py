@@ -1,16 +1,14 @@
 """
 data_engine/market/naaim.py
-讀取 naaim.csv 與 sentiment.csv，使用 Tabs 將機構與散戶情緒分開顯示
-(套用終極穩定版 Shapes 寫法畫出灰色衰退帶 + 標普500 對數座標)
+讀取 naaim.csv 與 sentiment.csv，處理機構與散戶情緒數據 (純 Reflex 後端版)
 """
 import pandas as pd
 import os
-import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import yfinance as yf
 
-@st.cache_data(ttl=3600)
+# 移除 st.cache_data
 def get_daily_sp500():
     try:
         sp = yf.download("^GSPC", period="max", progress=False, auto_adjust=False)
@@ -82,9 +80,6 @@ def fetch_data(ticker: str):
         "change_pct": 0.0 
     }
 
-# 內部共用繪圖模組
-# 內部共用繪圖模組
-# 內部共用繪圖模組
 def _create_macro_chart(df, title, raw_col, ma_col, raw_color, ma_color, h_upper, h_lower):
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
@@ -119,33 +114,33 @@ def _create_macro_chart(df, title, raw_col, ma_col, raw_color, ma_color, h_upper
     fig.add_hline(y=h_upper, line_dash="dash", line_color="#888888", secondary_y=False)
     fig.add_hline(y=h_lower, line_dash="dash", line_color="#888888", secondary_y=False)
 
-    # 🔥 終極解法：強制轉換為原生 Python datetime 物件，並使用 add_vrect
+    # 灰底衰退帶
     recessions = [
-        ("2001-03-01", "2001-11-30"), # 網路泡沫 (如果你的資料從 2003 開始，這根就不會出現，這是正常的)
-        ("2007-12-01", "2009-06-30"), # 金融海嘯
-        ("2020-02-01", "2020-04-30")  # Covid-19
+        ("2001-03-01", "2001-11-30"), 
+        ("2007-12-01", "2009-06-30"), 
+        ("2020-02-01", "2020-04-30")  
     ]
     
     for s, e in recessions:
-        # 強制轉型，徹底打通 Plotly 的任督二脈
         start_date = pd.to_datetime(s).to_pydatetime()
         end_date = pd.to_datetime(e).to_pydatetime()
         
         fig.add_vrect(
             x0=start_date, x1=end_date,
             fillcolor="white", 
-            opacity=0.25,  # 🌟 刻意調亮到 25%，保證絕對不被線條蓋住
+            opacity=0.25,  
             layer="below", 
             line_width=0
         )
 
-    # 排版美化 (移除 shapes 參數)
     fig.update_layout(
         height=550, 
         template="plotly_dark",
         hovermode="x unified", 
         legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
-        margin=dict(l=20, r=20, t=30, b=20)
+        margin=dict(l=20, r=20, t=30, b=20),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)"
     )
     
     fig.update_xaxes(type="date", showgrid=True, gridcolor="#333333") 
@@ -154,29 +149,26 @@ def _create_macro_chart(df, title, raw_col, ma_col, raw_color, ma_color, h_upper
 
     return fig
     
-def plot_chart(df, item):
+# 智慧判斷回傳圖表 (移除 st.tabs 與 st.plotly_chart)
+def plot_chart(df, item_config):
     if df.empty: return go.Figure()
 
-    tab1, tab2 = st.tabs(["👔 機構情緒 (NAAIM Exposure)", "🧑‍🤝‍🧑 散戶情緒 (AAII Bull-Bear Spread)"])
+    # 讀取前端指定的 ticker (預設為 NAAIM)
+    ticker = item_config.get("ticker", "NAAIM") if isinstance(item_config, dict) else str(item_config)
     
-    with tab1:
-        fig1 = _create_macro_chart(
-            df, title="NAAIM Exposure", 
-            raw_col="NAAIM", ma_col="NAAIM_MA20", 
-            raw_color="rgba(255, 204, 102, 0.8)", ma_color="#ff4d4d", 
-            h_upper=100, h_lower=40
-        )
-        st.plotly_chart(fig1, use_container_width=True)
-
-    with tab2:
-        fig2 = _create_macro_chart(
+    if ticker == "AAII":
+        fig = _create_macro_chart(
             df, title="AAII Spread", 
             raw_col="AAII_Spread", ma_col="AAII_MA20", 
             raw_color="rgba(102, 255, 204, 0.6)", ma_color="#00cc66", 
             h_upper=25, h_lower=-25
         )
-        st.plotly_chart(fig2, use_container_width=True)
+    else:
+        fig = _create_macro_chart(
+            df, title="NAAIM Exposure", 
+            raw_col="NAAIM", ma_col="NAAIM_MA20", 
+            raw_color="rgba(255, 204, 102, 0.8)", ma_color="#ff4d4d", 
+            h_upper=100, h_lower=40
+        )
 
-    empty_fig = go.Figure()
-    empty_fig.update_layout(height=10, margin=dict(t=0,b=0,l=0,r=0), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis=dict(visible=False), yaxis=dict(visible=False))
     return fig

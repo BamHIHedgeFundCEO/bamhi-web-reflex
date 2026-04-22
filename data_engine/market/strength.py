@@ -1,8 +1,7 @@
 """
 data_engine/market/strength.py
-負責讀取 sector_strength.csv 與 etf_holdings.json，渲染板塊熱力圖、總表與漏斗式選股面板
+負責讀取 sector_strength.csv 與 etf_holdings.json，計算動能指標並繪製熱力圖 (純 Reflex 後端版)
 """
-import streamlit as st
 import plotly.graph_objects as go
 import plotly.colors as pc
 import plotly.express as px
@@ -11,7 +10,8 @@ import numpy as np
 import yfinance as yf
 import json
 import os
-from data_engine import load_csv
+# 假設你的 data_engine/__init__.py 有這個函數，若無請確保能正確讀取 csv
+from data_engine import load_csv 
 
 BENCHMARK = "VTI"
 
@@ -80,37 +80,7 @@ def fetch_data(ticker: str):
     latest_price = float(df[BENCHMARK].iloc[-1]) if BENCHMARK in df.columns else 0.0
     return {"history": df, "value": latest_price, "change_pct": 0.0}
 
-def _create_fig(df, tickers, title_suffix):
-    fig = go.Figure()
-    if BENCHMARK in df.columns:
-        fig.add_trace(go.Scatter(
-            x=df["date"], y=df[BENCHMARK], mode='lines', name=f'{BENCHMARK} (左軸)',
-            line=dict(color='white', width=4, dash='solid'), yaxis='y1', opacity=0.3
-        ))
-    bright_colors = pc.qualitative.Prism + pc.qualitative.Pastel + pc.qualitative.Bold
-    valid_tickers = [t for t in tickers if t in df.columns]
-    if not valid_tickers: return fig.update_layout(title="請選擇至少一個板塊", height=600, template="plotly_dark")
-
-    for i, t in enumerate(valid_tickers):
-        rs = df[t] / df[BENCHMARK]
-        first_valid = rs.first_valid_index()
-        if first_valid is not None:
-            base_value = rs.loc[first_valid]
-            if base_value > 0: rs = rs / base_value
-        fig.add_trace(go.Scatter(x=df["date"], y=rs, mode='lines', name=f'{t} / {BENCHMARK}', line=dict(width=2, color=bright_colors[i % len(bright_colors)]), yaxis='y2'))
-
-    recessions = [("2007-12-01", "2009-06-30"), ("2020-02-01", "2020-04-30")]
-    shapes = [dict(type="rect", xref="x", yref="paper", x0=s, x1=e, y0=0, y1=1, fillcolor="white", opacity=0.1, layer="below", line_width=0) for s, e in recessions]
-    fig.update_layout(
-        title=f"相對強度分析 - {title_suffix}", hovermode="x unified", height=650, template="plotly_dark", shapes=shapes,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
-        yaxis=dict(title=dict(text=f"{BENCHMARK} Price", font=dict(color="rgba(255,255,255,0.5)")), side="left", showgrid=False),
-        yaxis2=dict(title="Relative Strength", side="right", overlaying="y", showgrid=True, gridcolor="#333333", tickformat=".2f", dtick=0.5)
-    )
-    fig.update_xaxes(showgrid=False)
-    return fig
-
-@st.cache_data(ttl=86400)
+# 保留純數學運算，供後續前端表格調用 (移除了 st.cache_data)
 def get_etf_top_holdings(ticker: str):
     file_path = "data/etf_holdings.json"
     if not os.path.exists(file_path): return []
@@ -120,7 +90,7 @@ def get_etf_top_holdings(ticker: str):
         return etf_holdings.get(ticker, [])
     except: return []
 
-@st.cache_data(ttl=3600)
+# 保留純數學運算，供後續前端表格調用 (移除了 st.cache_data)
 def compute_universal_metrics(close_df, high_df=None, low_df=None, benchmark="VTI"):
     if benchmark not in close_df.columns: return pd.DataFrame()
     bench_close = close_df[benchmark].dropna()
@@ -166,8 +136,8 @@ def compute_universal_metrics(close_df, high_df=None, low_df=None, benchmark="VT
         if high_df is not None and low_df is not None and t in high_df.columns:
             h = high_df[t].loc[common_idx]
             l = low_df[t].loc[common_idx]
-            pc = c.shift(1)
-            tr = pd.concat([h - l, (h - pc).abs(), (l - pc).abs()], axis=1).max(axis=1)
+            pc_val = c.shift(1)
+            tr = pd.concat([h - l, (h - pc_val).abs(), (l - pc_val).abs()], axis=1).max(axis=1)
             atr_14 = float(tr.rolling(14).mean().iloc[-1])
         else:
             atr_14 = float(delta.abs().rolling(14).mean().iloc[-1])
@@ -203,171 +173,43 @@ def compute_universal_metrics(close_df, high_df=None, low_df=None, benchmark="VT
     
     return df_res
 
-def _get_display_column_config():
-    return {
-        "Signal": st.column_config.TextColumn("訊號", help="🔥 代表符合黃金伏擊條件"),
-        "Group": "所屬板塊",
-        "Name": "標的名稱",
-        "Trend": st.column_config.LineChartColumn("60-Day Trend", y_min=0),
-        "Price": st.column_config.NumberColumn("Price", format="%.2f"),
-        "1D%": st.column_config.NumberColumn("1D%", format="%+.2f"),
-        "REL5": st.column_config.NumberColumn("REL5", format="%+.2f"),
-        "REL20": st.column_config.NumberColumn("REL20", format="%+.2f"),
-        "20R": st.column_config.NumberColumn("20R", format="%.0f"),
-        "60R": st.column_config.NumberColumn("60R", format="%.0f"),
-        "120R": st.column_config.NumberColumn("120R", format="%.0f"),
-        "Total Rank": st.column_config.NumberColumn("Rank", format="%.1f"),
-        "RSI": st.column_config.NumberColumn("14D RSI", format="%.1f"),
-        "ATR%": st.column_config.NumberColumn("ATR%", format="%.2f"),
-    }
+# 📊 專注繪製板塊熱力圖 (回傳給 Reflex)
+def plot_chart(df_history, item_config):
+    if df_history.empty:
+        return go.Figure()
 
-def _color_surfer(val):
-    if pd.isna(val): return ''
-    color = '#00eb00' if val > 0 else '#ff2b2b' if val < 0 else 'grey'
-    return f'color: {color}; font-weight: bold;'
-
-def plot_chart(df_history, item_name):
-    with st.spinner("正在初始化全市場動能數據..."):
-        df_etf_metrics = compute_universal_metrics(df_history.set_index('date'), benchmark=BENCHMARK)
-
-    tab1, tab2 = st.tabs(["🧭 板塊動能與多週期掃描", "🎯 Top-Down 漏斗式動能選股"])
+    # 預設觀察週期 20 天
+    lookback_days = 20
     
-    with tab1:
-        with st.expander("📈 展開查看各大板塊相對強度線圖", expanded=False):
-            all_flatten_tickers = [t for group in PORTFOLIO_STRUCTURE.values() for t in group.keys()]
-            selected_tickers = st.multiselect("👇 選擇要觀察的板塊/主題:", options=all_flatten_tickers, default=all_flatten_tickers[:5], key="ms_all")
-            st.plotly_chart(_create_fig(df_history, selected_tickers, "Market Sectors & Themes"), use_container_width=True)
-            
-        st.markdown("---")
-        st.subheader("🟩 板塊資金動能輪動 (Momentum Heatmap)")
-        lookback_options = {"1天 (1D)": 1, "3天 (3D)": 3, "1週 (5D)": 5, "1個月 (20D)": 20, "3個月 (60D)":60}
-        selected_period = st.radio("⏳ 選擇觀察週期:", options=list(lookback_options.keys()), index=3, horizontal=True)
-        lookback_days = lookback_options[selected_period]
-        
-        all_data = []
-        df_sorted = df_history.sort_values("date").ffill()
-        if len(df_sorted) > lookback_days + 1:
-            latest = df_sorted.iloc[-1]
-            prev = df_sorted.iloc[-(lookback_days + 1)]
-            for group, tickers in PORTFOLIO_STRUCTURE.items():
-                for t, name in tickers.items():
-                    if t in df_sorted.columns and pd.notna(latest.get(t)) and prev.get(t, 0) > 0:
-                        change = ((latest[t] - prev[t]) / prev[t]) * 100
-                        all_data.append({"代號": t, "名稱": name, "群組": group, "現價": latest[t], "漲跌幅(%)": change, "強弱分數": change})
-                        
-        result_df = pd.DataFrame(all_data)
-        if not result_df.empty:
-            fig_hm = px.treemap(
-                result_df, path=[px.Constant("全市場板塊與主題"), '群組', '代號'], values=[1] * len(result_df),
-                color='強弱分數', color_continuous_scale='RdYlGn', color_continuous_midpoint=0,
-                custom_data=['名稱', '現價', '漲跌幅(%)'],
-            )
-            fig_hm.update_traces(texttemplate="<b>%{label}</b><br>%{customdata[2]:.2f}%", hovertemplate="<b>%{label} (%{customdata[0]})</b><br>現價: %{customdata[1]:.2f}<br>漲跌幅: %{customdata[2]:.2f}%<extra></extra>")
-            fig_hm.update_layout(margin=dict(t=10, l=0, r=0, b=0), height=550, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig_hm, use_container_width=True)
+    all_data = []
+    df_sorted = df_history.sort_values("date").ffill()
+    
+    if len(df_sorted) > lookback_days + 1:
+        latest = df_sorted.iloc[-1]
+        prev = df_sorted.iloc[-(lookback_days + 1)]
+        for group, tickers in PORTFOLIO_STRUCTURE.items():
+            for t, name in tickers.items():
+                if t in df_sorted.columns and pd.notna(latest.get(t)) and prev.get(t, 0) > 0:
+                    change = ((latest[t] - prev[t]) / prev[t]) * 100
+                    all_data.append({
+                        "代號": t, "名稱": name, "群組": group, 
+                        "現價": latest[t], "漲跌幅(%)": change, "強弱分數": change
+                    })
+                    
+    result_df = pd.DataFrame(all_data)
+    if result_df.empty:
+        return go.Figure()
 
-        st.markdown("---")
-        st.subheader("📋 全球板塊與主題總覽 (Global Sectors Overview)")
-        st.caption("一眼看穿大盤資金流向，包含 20R/60R/120R 排名與相對大盤表現 (REL5, REL20)。")
-        
-        if not df_etf_metrics.empty:
-            # 加入 RSI 供 Tab 1 總覽檢視
-            overview_cols = ['Group', 'Ticker', 'Name', 'Price', '1D%', 'Trend', '20R', '60R', '120R', 'Total Rank', 'REL5', 'REL20', 'RSI']
-            st.dataframe(
-                df_etf_metrics[overview_cols].sort_values(['Group', 'Total Rank'], ascending=[True, False]),
-                column_config=_get_display_column_config(), use_container_width=True, hide_index=True, height=600
-            )
-
-        st.markdown("---")
-        st.subheader("🎯 多週期量化信號掃描")
-        if not df_etf_metrics.empty:
-            df_strat_base = df_etf_metrics.rename(columns={
-                'Ticker': '代號', 'Name': '名稱', 'Price': '最新價格',
-                'ATR%': '日常波動(ATR%)', '20R': '20D排名(PR)', 
-                '10D%': '10D漲跌(%)', '3D%': '3D點火(%)'
-            })
-            display_cols_strat = ['代號', '名稱', '最新價格', '日常波動(ATR%)', '20D排名(PR)', '10D漲跌(%)', '3D點火(%)']
-
-            strategy_a_df = df_strat_base[(df_strat_base['Total Rank'] >= 70) & (df_strat_base['3D點火(%)'] > 1.0 * df_strat_base['日常波動(ATR%)'])]
-            strategy_b_df = df_strat_base[(df_strat_base['Total Rank'] <= 30) & (df_strat_base['10D漲跌(%)'] < -2.0 * df_strat_base['日常波動(ATR%)']) & (df_strat_base['3D點火(%)'] > 0)]
-            strategy_c_df = df_strat_base[(df_strat_base['Total Rank'] >= 50) & (df_strat_base['3D點火(%)'] < -1.5 * df_strat_base['日常波動(ATR%)'])]
-
-            def render_strategy(df_strat):
-                if not df_strat.empty:
-                    df_display = df_strat[display_cols_strat].sort_values('3D點火(%)', ascending=False)
-                    st.dataframe(
-                        df_display.style.format({
-                            "最新價格": "{:.2f}", "日常波動(ATR%)": "{:.2f}",
-                            "20D排名(PR)": "{:.0f}", "10D漲跌(%)": "{:+.2f}", "3D點火(%)": "{:+.2f}"
-                        }).map(_color_surfer, subset=['10D漲跌(%)', '3D點火(%)']),
-                        use_container_width=True, hide_index=True
-                    )
-                else:
-                    st.write("目前無標的符合此條件")
-
-            st.markdown("##### 🔥 策略 A：動態點火 (VCP 動態突破)")
-            render_strategy(strategy_a_df)
-            st.markdown("##### 💎 策略 B：動態錯殺 (乖離過大反彈)")
-            render_strategy(strategy_b_df)
-            st.markdown("##### ⚠️ 策略 C：波段破壞 (避險與資金撤出)")
-            render_strategy(strategy_c_df)
-
-    with tab2:
-        st.subheader("🎯 第一階段：強勢板塊掃描 (點擊向下鑽取)")
-        st.markdown("👉 **請在下方表格最左側的「核取方塊 (Checkbox)」打勾**，即可瞬間展開該板塊內部的成分股！")
-        st.caption("💡 備註：最左側帶有 🔥 代表該板塊自身今日剛好符合「完美伏擊 4 條件」。若無 🔥 屬於正常現象，代表大盤目前處於極端單邊或混沌期。")
-        
-        # 🌟 補上你要求的所有欄位 (包含 RSI, ATR%, Is RS>60MA)
-        interactive_cols = ['Signal', 'Group', 'Ticker', 'Name', 'Price', '1D%', 'Trend', '20R', '60R', '120R', 'Total Rank', 'REL5', 'REL20', 'RSI', 'Is RS>60MA', 'ATR%']
-        
-        display_df = df_etf_metrics[interactive_cols].sort_values('Total Rank', ascending=False)
-        
-        event = st.dataframe(
-            display_df,
-            column_config=_get_display_column_config(),
-            use_container_width=True, hide_index=True, height=350,
-            on_select="rerun", selection_mode="single-row"
-        )
-        
-        selected_etf = None
-        if event.selection.rows:
-            # 確保點擊到的 index 能夠完美對應排序後的 dataframe
-            selected_idx = event.selection.rows[0]
-            selected_etf = display_df.iloc[selected_idx]['Ticker']
-
-        if selected_etf:
-            st.markdown("---")
-            st.subheader(f"🧬 第二階段：{selected_etf} 內部成分股掃描")
-            
-            holdings = get_etf_top_holdings(selected_etf)
-            if not holdings:
-                st.warning(f"⚠️ {selected_etf} 無法載入成分股，請確認 Pipeline 有成功抓取。")
-            else:
-                with st.spinner(f"正在即時計算 {selected_etf} 成分股的動能指標..."):
-                    yf_df = yf.download(holdings + [BENCHMARK], period="1y", auto_adjust=False, progress=False)
-                    if not yf_df.empty and 'Close' in yf_df.columns:
-                        close_df = yf_df['Close'] if isinstance(yf_df.columns, pd.MultiIndex) else yf_df
-                        high_df = yf_df['High'] if isinstance(yf_df.columns, pd.MultiIndex) else None
-                        low_df = yf_df['Low'] if isinstance(yf_df.columns, pd.MultiIndex) else None
-                        
-                        df_comp_metrics = compute_universal_metrics(close_df, high_df, low_df, benchmark=BENCHMARK)
-                        
-                        if not df_comp_metrics.empty:
-                            df_comp_golden = df_comp_metrics[df_comp_metrics['Signal'] == '🔥']
-
-                            st.markdown("### 🔥 終極成分股伏擊清單 (Golden Ambush List)")
-                            if df_comp_golden.empty:
-                                st.info(f"目前 {selected_etf} 成分股內無標的符合完美進場條件。")
-                            else:
-                                st.warning("💡 紀律提醒：進場後絕對止損位設於買入價下方 2.0 * ATR。單筆持倉勿超過總資金 12.5%。")
-                                # 成分股也加上完整的 R 排行與相對強弱
-                                golden_cols = ['Signal', 'Ticker', 'Name', 'Trend', 'Price', '1D%', '20R', '60R', '120R', 'Total Rank', 'REL5', 'REL20', 'RSI', 'Is RS>60MA', 'ATR%']
-                                st.dataframe(df_comp_golden[golden_cols].sort_values('Total Rank', ascending=False), column_config=_get_display_column_config(), use_container_width=True, hide_index=True)
-
-                            st.markdown(f"**🔍 {selected_etf} 所有成分股總覽** (點擊欄位標題可自由排序)")
-                            comp_cols = ['Signal', 'Ticker', 'Name', 'Price', '1D%', 'Trend', '20R', '60R', '120R', 'Total Rank', 'REL5', 'REL20', 'RSI', 'Is RS>60MA', 'ATR%']
-                            st.dataframe(df_comp_metrics[comp_cols].sort_values('Total Rank', ascending=False), column_config=_get_display_column_config(), use_container_width=True, hide_index=True)
-
-    empty_fig = go.Figure()
-    empty_fig.update_layout(height=10, margin=dict(t=0,b=0,l=0,r=0), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis=dict(visible=False), yaxis=dict(visible=False))
-    return fig
+    fig_hm = px.treemap(
+        result_df, path=[px.Constant("全市場板塊與主題"), '群組', '代號'], values=[1] * len(result_df),
+        color='強弱分數', color_continuous_scale='RdYlGn', color_continuous_midpoint=0,
+        custom_data=['名稱', '現價', '漲跌幅(%)'],
+    )
+    fig_hm.update_traces(
+        texttemplate="<b>%{label}</b><br>%{customdata[2]:.2f}%", 
+        hovertemplate="<b>%{label} (%{customdata[0]})</b><br>現價: %{customdata[1]:.2f}<br>漲跌幅: %{customdata[2]:.2f}%<extra></extra>"
+    )
+    fig_hm.update_layout(margin=dict(t=10, l=0, r=0, b=0), height=550, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)")
+    
+    # 直接將圖表物件還給大腦
+    return fig_hm
